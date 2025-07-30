@@ -1,0 +1,285 @@
+version: v1beta
+
+variable:
+  contract_document:
+    title: Contract Document
+    description: Legal contract document to review (PDF, DOCX, etc.)
+    type: file
+  slack_channel:
+    title: Slack Channel
+    description: Slack channel name for red flag notifications
+    type: string
+    default: contract-alerts
+
+component:
+  # Step 1: Convert document to text
+  document-to-text:
+    type: document
+    task: TASK_CONVERT_TO_TEXT
+    input:
+      document: ${variable.contract_document}
+
+  # Step 2: Generate contract summary
+  contract-summary:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Please analyze this contract content and provide a comprehensive summary including:
+        1. Contract type (e.g., "Employment Agreement", "NDA", "Service Agreement", etc.)
+        2. Key parties involved
+        3. Main terms and conditions
+        4. Duration or validity period
+        5. Key obligations and responsibilities
+
+        **Contract Content:**
+        ${document-to-text.output.body}
+
+        Provide a clear, structured summary:
+      response-format:
+        type: text
+      system-message: You are a professional and versatile lawyer with diverse legal backgrounds who reviews, investigates and analyzes contracts with precision and attention to detail.
+      temperature: 0.3
+      top-p: 0.9
+
+  # Step 3: Detect red flags
+  redflags-detection:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Analyze this contract content and identify potential red flags, legal risks, and concerning clauses. Look for:
+        
+        1. Unfair or one-sided terms
+        2. Vague or ambiguous language
+        3. Excessive penalties or liability clauses
+        4. Unreasonable termination conditions
+        5. Intellectual property concerns
+        6. Confidentiality overreach
+        7. Jurisdiction or dispute resolution issues
+        8. Payment terms concerns
+        9. Indemnification problems
+        10. Any other legal risks or problematic clauses
+
+        **Contract Content:**
+        ${document-to-text.output.body}
+
+        Identify and explain each red flag with specific references to the contract text:
+      response-format:
+        type: text
+      system-message: You are a senior legal expert specializing in contract risk assessment. Your role is to identify potential legal pitfalls, unfair terms, and risks that could harm the contracting party. Be thorough and specific in your analysis.
+      temperature: 0.2
+      top-p: 0.8
+
+  # Step 4: Evaluate if red flags exist
+  redflags-evaluation:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o-mini
+      prompt: |-
+        Based on the red flags analysis, determine if there are any significant red flags or legal concerns that require attention.
+
+        **Red Flags Analysis:**
+        ${redflags-detection.output.texts[0]}
+
+        Evaluate and respond:
+      response-format:
+        json-schema: |
+          {
+              "name": "redflags_evaluation",
+              "strict": true,
+              "schema": {
+                  "type": "object",
+                  "properties": {
+                      "hasRedflags": {
+                          "type": "boolean",
+                          "description": "Whether significant red flags or legal concerns were identified"
+                      },
+                      "riskLevel": {
+                          "type": "string",
+                          "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                          "description": "Overall risk level of the contract"
+                      },
+                      "urgency": {
+                          "type": "string",
+                          "enum": ["LOW", "MEDIUM", "HIGH"],
+                          "description": "Urgency level for addressing the red flags"
+                      }
+                  },
+                  "required": [
+                      "hasRedflags",
+                      "riskLevel", 
+                      "urgency"
+                  ],
+                  "additionalProperties": false
+              }
+          }
+        type: json_schema
+      system-message: You are a legal risk assessment expert. Evaluate the severity and urgency of identified red flags objectively.
+      temperature: 0
+      top-p: 1
+
+  # Step 5: Convert evaluation to JSON
+  evaluation-to-json:
+    type: json
+    task: TASK_UNMARSHAL
+    input:
+      string: ${redflags-evaluation.output.texts[0]}
+
+  # Step 6: Structure red flags into detailed list (only if red flags exist)
+  structured-redflags:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Convert the red flags analysis into a structured format with individual red flags, each with a clear description and recommendation.
+
+        **Red Flags Analysis:**
+        ${redflags-detection.output.texts[0]}
+
+        Structure the output as a detailed list:
+      response-format:
+        json-schema: |
+          {
+              "name": "structured_redflags",
+              "strict": true,
+              "schema": {
+                  "type": "object",
+                  "properties": {
+                      "redflags": {
+                          "type": "array",
+                          "items": {
+                              "type": "object",
+                              "properties": {
+                                  "title": {
+                                      "type": "string",
+                                      "description": "Brief title of the red flag"
+                                  },
+                                  "description": {
+                                      "type": "string",
+                                      "description": "Detailed description of the red flag and why it's concerning"
+                                  },
+                                  "severity": {
+                                      "type": "string",
+                                      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                                      "description": "Severity level of this specific red flag"
+                                  },
+                                  "recommendation": {
+                                      "type": "string",
+                                      "description": "Recommended action to address this red flag"
+                                  },
+                                  "contractReference": {
+                                      "type": "string",
+                                      "description": "Reference to the specific contract section or clause"
+                                  }
+                              },
+                              "required": [
+                                  "title",
+                                  "description",
+                                  "severity",
+                                  "recommendation",
+                                  "contractReference"
+                              ],
+                              "additionalProperties": false
+                          }
+                      },
+                      "totalCount": {
+                          "type": "integer",
+                          "description": "Total number of red flags identified"
+                      }
+                  },
+                  "required": [
+                      "redflags",
+                      "totalCount"
+                  ],
+                  "additionalProperties": false
+              }
+          }
+        type: json_schema
+      system-message: You are a legal documentation expert. Structure the red flags analysis into a clear, actionable format for legal review.
+      temperature: 0.1
+      top-p: 0.9
+    condition: ${evaluation-to-json.output.json.hasRedflags} == true
+
+  # Step 7: Convert structured red flags to JSON
+  redflags-to-json:
+    type: json
+    task: TASK_UNMARSHAL
+    input:
+      string: ${structured-redflags.output.texts[0]}
+    condition: ${evaluation-to-json.output.json.hasRedflags} == true
+
+  # Step 8: Format Slack notification message
+  format-slack-message:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o-mini
+      prompt: |-
+        Create a concise but informative Slack notification message about the contract red flags found.
+
+        **Contract Summary:**
+        ${contract-summary.output.texts[0]}
+
+        **Risk Level:** ${evaluation-to-json.output.json.riskLevel}
+        **Urgency:** ${evaluation-to-json.output.json.urgency}
+        **Total Red Flags:** ${redflags-to-json.output.json.totalCount}
+
+        **Red Flags Details:**
+        ${redflags-to-json.output.json.redflags}
+
+        Format as a professional Slack message with:
+        - Clear subject line
+        - Risk level indicator
+        - Summary of key red flags
+        - Call to action
+        - Use appropriate emojis and formatting for Slack
+      response-format:
+        type: text
+      system-message: You are a professional communication specialist. Create clear, actionable Slack notifications that convey urgency appropriately without causing panic.
+      temperature: 0.3
+      top-p: 0.9
+    condition: ${evaluation-to-json.output.json.hasRedflags} == true
+
+  # Step 9: Send Slack notification (only if red flags exist)
+  slack-notification:
+    type: slack
+    task: TASK_WRITE_MESSAGE
+    input:
+      channel-name: ${variable.slack_channel}
+      message: ${format-slack-message.output.texts[0]}
+      as-user: false
+    condition: ${evaluation-to-json.output.json.hasRedflags} == true
+    setup: ${connection.slack-connection}
+
+output:
+  contract_summary:
+    title: Contract Summary
+    value: ${contract-summary.output.texts[0]}
+    instill-ui-order: 1
+  redflags_analysis:
+    title: Red Flags Analysis
+    value: ${redflags-detection.output.texts[0]}
+    instill-ui-order: 2
+  risk_evaluation:
+    title: Risk Evaluation
+    value: ${evaluation-to-json.output.json}
+    instill-ui-order: 3
+  structured_redflags:
+    title: Structured Red Flags
+    value: ${redflags-to-json.output.json}
+    condition: ${evaluation-to-json.output.json.hasRedflags} == true
+    instill-ui-order: 4
+  notification_sent:
+    title: Slack Notification Status
+    value: ${slack-notification.output}
+    condition: ${evaluation-to-json.output.json.hasRedflags} == true
+    instill-ui-order: 5
+  document_text:
+    title: Extracted Document Text
+    value: ${document-to-text.output.body}
+    instill-ui-order: 6 

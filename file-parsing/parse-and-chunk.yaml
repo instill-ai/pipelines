@@ -1,0 +1,56 @@
+version: v1beta
+variable:
+  input-document:
+    title: Input Document
+    type: file
+  chunk-size:
+    title: Chunk Size
+    description: Number of tokens per chunk
+    type: number
+  chunk-strategy:
+    title: Chunking Strategy
+    description: Markdown/Recursive/Token
+    type: string
+component:
+  advanced-parser:
+    type: http
+    task: TASK_POST
+    input:
+      endpoint-url: https://api.instill-ai.com/v1alpha/organizations/instill-ai/models/docling/trigger
+      body: |-
+        {
+            "taskInputs": [
+                {
+                    "data": {
+                        "doc_content": "${variable.input-document:data-uri}"
+                    }
+                }
+            ]
+        }
+    condition:
+    setup: ${connection.model}
+  merge-pages:
+    type: json
+    input:
+      json-value: ${advanced-parser.output.body.taskOutputs[0].data.markdown_pages}
+      jq-filter: join("\n")
+    task: TASK_JQ
+  chunk-text:
+    type: text
+    task: TASK_CHUNK_TEXT
+    input:
+      text: ${merge-pages.output.results[0]}
+      strategy:
+        setting:
+          chunk-method: ${variable.chunk-strategy}
+          chunk-overlap: 0
+          chunk-size: ${variable.chunk-size}
+          code-blocks: true
+          model-name: gpt-4
+output:
+  parsed-document:
+    title: Parsed Document
+    value: ${merge-pages.output.results[0]}
+  chunks:
+    title: Chunked Document
+    value: ${chunk-text.output.text-chunks}

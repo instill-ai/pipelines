@@ -1,0 +1,107 @@
+version: v1beta
+variable:
+  catalog-name:
+    title: Catalog Name
+    description: Name of the new Catalog
+    type: string
+  tags:
+    title: Catalog Tags
+    description: Tags for the Catalog
+    type: array:string
+  file-name-prefix:
+    title: Filename Prefix
+    description: Filename prefix to use when indexing page into catalog
+    type: string
+  regex-filter:
+    title: Regex Filter
+    description: Only crawls URLs that are matched by this (use .* to crawl all URLs)
+    type: string
+  max-k:
+    title: Maximum Pages
+    description: The max number of pages to crawl
+    type: number
+  namespace:
+    title: Namespace
+    description: Namespace of the user or organisation whose Catalog is being indexed
+    type: string
+  timeout:
+    title: Timeout
+    description: Time length (in millisecond) for scraping dynamnic content
+    type: number
+  url:
+    title: Web URL
+    description: URL to be processed
+    type: string
+component:
+  crawler:
+    type: web
+    input:
+      max-depth: 0
+      max-k: ${variable.max-k}
+      timeout: ${variable.timeout}
+      url: ${variable.url}
+      filter:
+        include-pattern: ${variable.regex-filter}
+    task: TASK_CRAWL_SITE
+  json-filter:
+    type: json
+    input:
+      json-value: ${crawler.output.pages}
+      jq-filter: .[] | ."link"
+    task: TASK_JQ
+  scraper:
+    type: web
+    input:
+      urls: ${json-filter.output.results}
+      scrape-method: http
+      include-html: false
+      only-main-content: true
+      only-include-tags:
+      timeout: ${variable.timeout}
+    task: TASK_SCRAPE_PAGES
+  encode-pages:
+    type: iterator
+    range:
+      start: 0
+      stop: ${scraper.output.pages:length}
+    component:
+      encode-page:
+        type: base64
+        task: TASK_ENCODE
+        input:
+          data: ${scraper.output.pages[i].markdown}
+    output-elements:
+      result: ${encode-page.output.data}
+  generate-filenames:
+    type: iterator
+    range:
+      start: 0
+      stop: ${scraper.output.pages:length}
+    component:
+      create-filename:
+        type: collection
+        input:
+          data:
+            - ${variable.file-name-prefix}-page${i}.md
+        task: TASK_ASSIGN
+    output-elements:
+      result: ${create-filename.output.data[0]}
+  index-pages:
+    type: instill-artifact
+    input:
+      options:
+        namespace: ${variable.namespace}
+        catalog-id: ${variable.catalog-name}
+        description: test catalog
+        files: ${encode-pages.output.result}
+        file-names: ${generate-filenames.output.result}
+        tags: ${variable.tags}
+        option: create new catalog
+    task: TASK_UPLOAD_FILES
+output:
+  crawled:
+    title: Pages Crawled
+    value: ${crawler.output.pages}
+  scraped:
+    title: Scraped Markdown
+    value: ${generate-filenames.output.result}

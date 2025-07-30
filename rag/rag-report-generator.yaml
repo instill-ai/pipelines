@@ -1,0 +1,230 @@
+version: v1beta
+variable:
+  catalog-name:
+    title: Catalog Name
+    description: Name of the catalog/KB to retrieve information from
+    type: string
+  namespace:
+    title: Namespace
+    description: Namespace where catalog/KB exists
+    type: string
+  criteria-list:
+    title: Criteria List
+    description: List of criteria to search for and incorporate into the report
+    type: array:string
+  general-instruction:
+    title: General Instruction
+    description: General instruction for the report generation
+    type: string
+  num-sections:
+    title: Number of Sections
+    description: Number of sections the report should contain
+    type: number
+  top-k:
+    title: Top K
+    description: Number of chunks to retrieve per criteria search
+    type: number
+component:
+  criteria-rag-search:
+    type: iterator
+    input: ${variable.criteria-list}
+    component:
+      retrieve-for-criteria:
+        type: instill-artifact
+        task: TASK_RETRIEVE
+        input:
+          catalog-id: ${variable.catalog-name}
+          namespace: ${variable.namespace}
+          text-prompt: ${criteria-rag-search.element}
+          top-k: ${variable.top-k}
+    output-elements:
+      retrieved-chunks: ${retrieve-for-criteria.output.chunks}
+  generate-section-titles:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      n: 1
+      prompt: |-
+        Based on the provided criteria and general instruction, generate ${variable.num-sections} section titles for a comprehensive report.
+
+        **General Instruction:**
+        ${variable.general-instruction}
+
+        **Criteria to be covered:**
+        ${variable.criteria-list}
+
+        **Retrieved Information Context:**
+        ${criteria-rag-search.output}
+
+        **Requirements:**
+        1. Generate exactly ${variable.num-sections} section titles
+        2. Each section should logically organize the content based on the criteria and instruction
+        3. Titles should be clear, descriptive, and professional
+        4. Ensure all criteria are appropriately distributed across the sections
+        5. Consider the retrieved information when structuring the sections
+
+        Please provide the section titles as a numbered list.
+      response-format:
+        type: text
+      system-message: |-
+        You are an expert report writer and content organizer. Your task is to create logical, well-structured section titles that will guide the creation of a comprehensive report.
+        
+        Follow these principles:
+        1. Ensure logical flow and progression between sections
+        2. Balance the coverage of different criteria across sections
+        3. Create titles that are specific enough to guide content creation but broad enough to allow comprehensive coverage
+        4. Consider the audience and purpose implied by the general instruction
+        5. Maintain professional and clear language throughout
+      temperature: 0.2
+      top-p: 0.9
+  extract-section-titles:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o-mini
+      n: 1
+      prompt: |-
+        Extract the section titles from the following text and format them as a JSON array of strings.
+
+        **Section Titles Text:**
+        ${generate-section-titles.output.texts[0]}
+
+        Return only the JSON array with the section titles, no additional text or formatting.
+      response-format:
+        json-schema: |
+          {
+              "name": "section_titles",
+              "strict": true,
+              "schema": {
+                  "type": "object",
+                  "properties": {
+                      "titles": {
+                          "type": "array",
+                          "items": {
+                              "type": "string"
+                          },
+                          "description": "Array of section titles"
+                      }
+                  },
+                  "required": ["titles"],
+                  "additionalProperties": false
+              }
+          }
+        type: json_schema
+      system-message: You are a helpful assistant that extracts and formats section titles.
+      temperature: 0.1
+      top-p: 0.9
+  titles-to-json:
+    type: json
+    task: TASK_UNMARSHAL
+    input:
+      string: ${extract-section-titles.output.texts[0]}
+  write-sections:
+    type: iterator
+    input: ${titles-to-json.output.json.titles}
+    component:
+      write-section:
+        type: openai
+        task: TASK_TEXT_GENERATION
+        input:
+          model: gpt-4o
+          n: 1
+          prompt: |-
+            Write a comprehensive section for the report with the title: "${write-sections.element}"
+
+            **General Instruction:**
+            ${variable.general-instruction}
+
+            **Criteria to incorporate:**
+            ${variable.criteria-list}
+
+            **All Retrieved Information:**
+            ${criteria-rag-search.output.retrieved-chunks}
+
+            **All Section Titles (for context):**
+            ${titles-to-json.output.json.titles}
+
+            **Requirements:**
+            1. Write a detailed, well-structured section that addresses the section title
+            2. Incorporate relevant information from the retrieved chunks
+            3. Ensure the content aligns with the general instruction and relevant criteria
+            4. Use professional, clear, and engaging language
+            5. Include specific details, examples, and insights from the retrieved information
+            6. Maintain logical flow and coherence within the section
+            7. Ensure the section complements other sections without unnecessary repetition
+
+            Write the complete section content below:
+          response-format:
+            type: text
+          system-message: |-
+            You are an expert report writer capable of creating comprehensive, well-researched sections. Your task is to write detailed content that:
+            
+            1. Directly addresses the section title and scope
+            2. Integrates relevant information from the provided sources
+            3. Maintains professional tone and structure
+            4. Provides valuable insights and analysis
+            5. Ensures factual accuracy based on the retrieved information
+            6. Creates engaging and informative content for the target audience
+            
+            Focus on quality, clarity, and comprehensive coverage of the topic within the section scope.
+          temperature: 0.3
+          top-p: 0.9
+    output-elements:
+      title: ${write-sections.element}
+      content: ${write-section.output.texts[0]}
+  merge-report:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      n: 1
+      prompt: |-
+        Merge the following sections into a final, cohesive report. Add an appropriate introduction and conclusion.
+
+        **General Instruction:**
+        ${variable.general-instruction}
+
+        **Section Contents:**
+        ${write-sections.output.content}
+
+        **Section Titles:**
+        ${write-sections.output.title}
+
+        **Requirements:**
+        1. Create a professional introduction that sets the context for the report
+        2. Organize the sections in logical order with clear headings
+        3. Ensure smooth transitions between sections
+        4. Add a comprehensive conclusion that summarizes key findings and insights
+        5. Maintain consistent formatting and style throughout
+        6. Ensure the final report flows naturally and addresses the general instruction
+
+        Generate the complete final report:
+      response-format:
+        type: text
+      system-message: |-
+        You are an expert report editor and writer. Your task is to create a polished, professional final report by:
+        
+        1. Writing an engaging introduction that establishes context and purpose
+        2. Organizing sections logically with clear headings and transitions
+        3. Ensuring consistency in tone, style, and formatting
+        4. Creating a strong conclusion that synthesizes key insights
+        5. Maintaining professional standards throughout
+        6. Ensuring the report meets the original instruction and requirements
+        
+        Focus on creating a cohesive, comprehensive document that effectively communicates the intended message.
+      temperature: 0.2
+      top-p: 0.9
+output:
+  final-report:
+    title: Final Report
+    value: ${merge-report.output.texts[0]}
+  section-titles:
+    title: Section Titles
+    value: ${titles-to-json.output.json.titles}
+  criteria-search-results:
+    title: Criteria Search Results
+    value: ${criteria-rag-search.output}
+  individual-sections:
+    title: Individual Sections
+    value: ${write-sections.output}

@@ -1,0 +1,128 @@
+version: v1beta
+variable:
+  catalog-name:
+    title: Catalog Name
+    description: Name of the Catalog to retrieve from
+    type: string
+  top-k:
+    title: Top K
+    description: How many chunks to retrieve
+    type: number
+  user-query:
+    title: User Query
+    description: Original user query
+    type: string
+  sess-id:
+    title: Session ID
+    description: Unique session ID to load or save chat history
+    type: string
+component:
+  redis-write-query:
+    type: redis
+    task: TASK_WRITE_CHAT_MESSAGE
+    input:
+      content: ${variable.user-query}
+      role: "User: "
+      session-id: ${variable.sess-id}
+    setup: ${connection.conversation-history}
+  redis-read:
+    type: redis
+    task: TASK_RETRIEVE_CHAT_HISTORY
+    input:
+      include-system-message: false
+      latest-k: 5
+      session-id: ${variable.sess-id}
+    setup: ${connection.conversation-history}
+  query-revisor:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      max-tokens: 1024
+      model: gpt-4o-mini
+      n: 1
+      prompt: |-
+        As an expert in language processing and query formulation, your task is to refine and rephrase a user's follow-up query into a standalone query in English.
+        This rephrased query is intended for precise searching within a vector database to locate relevant documents.
+        You should correct any pronouns, typos, or grammatical errors in both the conversation history and the user's query to ensure the search engine can retrieve accurate and relevant documents.
+
+        The goal is to produce an accurate and effective query that can be used to retrieve relevant related documents from the vector database.
+
+        **Follow-up Query:**
+        ${variable.user-query}
+
+        **Conversation History:**
+        ${redis-read.output.messages}
+
+        Reformulated Standalone Query:
+      response-format:
+        type: text
+      system-message: You are a smart and helpful prompt engineer and expert at revising user queries for vector database search.
+      temperature: 0
+      top-p: 1
+  retrieve-from-catalog:
+    type: instill-artifact
+    task: TASK_RETRIEVE
+    input:
+      catalog-id: ${variable.catalog-name}
+      namespace: george_strong
+      text-prompt: ${query-revisor.output.texts[0]}
+      top-k: ${variable.top-k}
+  generate-response:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      n: 1
+      system-message: |-
+        You are a smart and helpful Q&A agent, assisting users by accurately answering their questions based on the provided context.
+        Follow these steps and instructions to generate your response:
+
+        1. Carefully review the user's follow-up question and the provided context and conversation history.
+        2. Break down the follow-up question into smaller, manageable parts if necessary.
+        3. For each part of the question:
+        a. Select the most relevant information from the context.
+        b. Make reasonable inferences based on the given context, but do not go beyond the provided information.
+        4. Draft a response using the selected information, ensuring the level of detail is appropriate for the user's expertise.
+        5. Remove any duplicate content from the draft response.
+        6. Adjust the draft to increase accuracy and relevance.
+        7. Do not include instructions' explanations or details in your final response.
+        8. If the question cannot be answered based on the provided context, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for the specified Catalog.
+      prompt: |-
+        You are an accurate and reliable AI assistant capable of answering questions using external documents.
+        Always be faithful to the provided documents and leverage relevant, accurate information from them as much as possible.
+        Be aware that external documents might contain noisy or factually incorrect data.
+        Apply critical reasoning to discern and use the correct information from these sources.
+        If the follow-up query cannot be answered based on the context or the conversation history, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for the specified Catalog.
+
+        **Context:**
+        ${retrieve-from-catalog.output.chunks}
+
+        **Follow-up Query:**
+        ${variable.user-query}
+
+        **Conversation History:**
+        ${redis-read.output.messages}
+
+        Now, generate your final response based on the given instructions, conversation history, and context to answer the user's follow-up question:
+      response-format:
+        type: text
+      temperature: 0.1
+      top-p: 0.9
+  redis-write-response:
+    type: redis
+    task: TASK_WRITE_CHAT_MESSAGE
+    input:
+      content: ${generate-response.output.texts[0]}
+      role: "Assistant: "
+      session-id: ${variable.sess-id}
+    setup: ${connection.conversation-history}
+output:
+  response:
+    title: Response
+    value: ${generate-response.output.texts[0]}
+  retrieved-chunks:
+    title: Retrieved Chunks
+    value: ${retrieve-from-catalog.output.chunks}
+  revised-query:
+    title: Revised Query
+    value: ${query-revisor.output.texts[0]}

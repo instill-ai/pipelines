@@ -1,0 +1,73 @@
+version: v1beta
+variable:
+  instructions:
+    title: Instructions
+    description: Instructions for writing response
+    type: string
+  respond:
+    title: Respond Automatically
+    description: Whether to respond automatically or not
+    type: boolean
+component:
+  get-latest-email:
+    type: email
+    task: TASK_READ_EMAILS
+    input:
+      search:
+        mailbox: inbox
+        search-from:
+        search-to:
+        search-subject:
+        limit: 1
+        date:
+        search-email-message:
+    setup: ${connection.receive-mail}
+  generate-response:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      n: 1
+      system-message: |-
+        You are a smart and helpful assistant.
+      prompt: |-
+        Generate a suitable response to the email message.
+
+        Name: Flying Llama
+        Contact info: flyingllama37@gmail.com
+
+        **Instructions:**
+        ${variable.instructions}
+
+        **Email Message:**
+        ${get-latest-email.output.emails}
+      response-format:
+        type: text
+      temperature: 0
+      top-p: 1
+  extract-sender-address:
+    type: json
+    task: TASK_JQ
+    input:
+      json-value: ${get-latest-email.output.emails}
+      jq-filter: .[].from | capture("<(?<email>[^>]+)>").email
+  send-email-response:
+    type: email
+    task: TASK_SEND_EMAIL
+    input:
+      recipients: 
+        - ${extract-sender-address.output.results[0]}
+      subject: ${get-latest-email.output.emails[0].subject}
+      message: ${generate-response.output.texts[0]}
+    setup: ${connection.send-mail}
+    condition: ${variable.respond}
+  
+output:
+  latest-email:
+    title: Latest Email
+    value: ${get-latest-email.output.emails}
+    instill-ui-order: 1
+  response:
+    title: Generated Response
+    value: ${generate-response.output.texts[0]}
+    instill-ui-order: 2

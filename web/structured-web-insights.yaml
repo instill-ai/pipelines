@@ -1,0 +1,145 @@
+version: v1beta
+variable:
+  search-query:
+    title: Search Query
+    description: Google search query
+    type: string
+  top-k:
+    title: Number of Results
+    description: Number of Google Search results to process
+    type: number
+component:
+  google-search:
+    type: google-search
+    task: TASK_SEARCH
+    input:
+      include-link-html: false
+      include-link-text: true
+      query: ${variable.search-query}
+      top-k: ${variable.top-k}
+    setup: ${connection.google-search}
+  process-page-content:
+    type: iterator
+    range:
+      start: 0
+      stop: ${variable.top-k}
+    component:
+      extract-and-summarize:
+        type: openai
+        task: TASK_TEXT_GENERATION
+        input:
+          model: gpt-4o-mini
+          n: 1
+          prompt: |-
+            You are given the content of a scraped website. Analyze the content and summarize the key insights that are relevant to the user's search query.
+
+            **Search Query**:
+            ${variable.search-query}
+
+            **Website Content**:
+            ${google-search.output.results[i].link-text}
+
+            **Website URL**:
+            ${google-search.output.results[i].link}
+
+            Now generate your response, providing an output for each of the steps:
+          response-format:
+            type: text
+          system-message: |-
+            You are a helpful assistant.
+
+            Follow these steps and instructions to generate your response:
+            1. Write a brief summary of the content
+            2. Extract the title of the content
+            3. Identify the source (e.g., website name)
+            4. List the key insights from the content
+            5. Extract the author's name (if available)
+            6. Mention the published date (if available)
+            7. Identify any relevant keywords, tags or topics discussed
+          temperature: 0
+          top-p: 1
+      structure-response:
+        type: openai
+        task: TASK_TEXT_GENERATION
+        input:
+          model: gpt-4o-2024-08-06
+          n: 1
+          prompt: |-
+            Extract from this content: ${extract-and-summarize.output.texts[0]}
+            URL: ${google-search.output.results[i].link}
+          response-format:
+            json-schema: |
+              {
+                  "name": "structured_content",
+                  "description": "Extracts, summarizes and structures information from a webpage",
+                  "strict": true,
+                  "schema": {
+                      "type": "object",
+                      "properties": {
+                          "summary": {
+                              "type": "string",
+                              "description": "A brief summary of the content"
+                          },
+                          "title": {
+                              "type": "string",
+                              "description": "Title of the webpage"
+                          },
+                          "url": {
+                              "type": "string",
+                              "description": "Webpage URL"
+                          },
+                          "source": {
+                              "type": "string",
+                              "description": "The source of the content (e.g., website name)"
+                          },
+                          "author": {
+                              "type": "string",
+                              "description": "Author's name (if available)"
+                          },
+                          "published_date": {
+                              "type": "string",
+                              "description": "Published data (if available)"
+                          },
+                          "tags": {
+                              "type": "array",
+                              "description": "Relevant keywords, tags or topics discussed",
+                              "items": {
+                                  "type": "string"
+                              }
+                          },
+                          "key_insights": {
+                              "type": "array",
+                              "description": "A list of key insights from the content",
+                              "items": {
+                                  "type": "string"
+                              }
+                          }
+                      },
+                      "required": [
+                          "summary",
+                          "title",
+                          "url",
+                          "source",
+                          "author",
+                          "published_date",
+                          "tags",
+                          "key_insights"
+                      ],
+                      "additionalProperties": false
+                  }
+              }
+            type: json_schema
+          system-message: You are a helpful assistant.
+          temperature: 0
+          top-p: 1
+      text-to-json:
+        type: json
+        task: TASK_UNMARSHAL
+        input:
+          string: ${structure-response.output.texts[0]}
+    output-elements:
+      result: ${text-to-json.output.json}
+output:
+  structured-output:
+    title: Structured web-search summary
+    value: ${process-page-content.output.result}

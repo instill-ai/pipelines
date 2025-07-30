@@ -1,0 +1,70 @@
+version: v1beta
+variable:
+  catalog-name:
+    title: Catalog Name
+    description: the name of the Catalog to retrieve from
+    type: string
+  top-k:
+    title: Top K
+    description: for vector database retriever (how many docs to return at most) e.g., 10
+    type: number
+  user-query:
+    title: User Query
+    description: original user query
+    type: string
+  namespace:
+    title: Namespace
+    description: the namespace of the user or organisation whose catalog is being retrieved from
+    type: string
+component:
+  retrieve-from-catalog:
+    type: instill-artifact
+    task: TASK_RETRIEVE
+    input:
+      catalog-id: ${variable.catalog-name}
+      namespace: ${variable.namespace}
+      text-prompt: ${variable.user-query}
+      top-k: ${variable.top-k}
+  generate-response:
+    type: mistral-ai
+    input:
+      model-name: open-mixtral-8x22b
+      system-message: |-
+        You are a smart and helpful Q&A agent, assisting users by accurately answering their questions based on the provided context.
+        Follow these steps and instructions to generate your response:
+
+        1. Carefully review the user's query and the provided context.
+        2. Break down the user's query into smaller, manageable parts if necessary.
+        3. For each part of the question:
+        a. Select the most relevant information from the context.
+        b. Make reasonable inferences based on the given context, but do not go beyond the provided information.
+        4. Draft a response using the selected information, ensuring the level of detail is appropriate for the user's expertise.
+        5. Remove any duplicate content from the draft response.
+        6. Adjust the draft to increase accuracy and relevance.
+        7. Do not include instructions' explanations or details in your final response.
+        8. If the question cannot be answered based on the provided context, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for the specified Catalog.
+      prompt: |-
+        You are an accurate and reliable AI assistant capable of answering questions using external documents.
+        Always be faithful to the provided documents and leverage relevant, accurate information from them as much as possible.
+        Be aware that external documents might contain noisy or factually incorrect data.
+        Apply critical reasoning to discern and use the correct information from these sources.
+        If the question cannot be answered based on the context and user's questions/instructions at all, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for the specified Catalog.
+        
+        **Context:**
+        ${retrieve-from-catalog.output.chunks}
+        
+        **User Query:**
+        ${variable.user-query}
+        
+        Now, generate your final response based on the given instructions and context to answer the user's query:
+      top-k: 10
+      temperature: 0.1
+      max-new-tokens: 1000
+    task: TASK_TEXT_GENERATION_CHAT
+output:
+  response:
+    title: Response
+    value: ${generate-response.output.text}
+  retrieved-chunks:
+    title: Retrieved Chunks
+    value: ${retrieve-from-catalog.output.chunks}

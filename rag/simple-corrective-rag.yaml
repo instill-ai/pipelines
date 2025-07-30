@@ -1,0 +1,204 @@
+version: v1beta
+variable:
+  catalog-name:
+    title: Catalog Name
+    description: the name of the Catalog to retrieve from
+    type: string
+  top-k:
+    title: Top K
+    description: for vector database retriever (how many docs to return at most) e.g., 10
+    type: number
+  user-query:
+    title: User Query
+    description: original user query
+    type: string
+  namespace:
+    title: Namespace
+    description: the namespace of the user or organisation whose catalog is being retrieved from
+    type: string
+component:
+  query-revisor:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o-mini
+      n: 1
+      prompt: |- 
+        As an expert in language processing and query formulation, your task is to refine and rephrase a user's query in English.
+        This rephrased query is intended for precise searching within a vector database to locate relevant documents.
+        You should correct any pronouns, typos, or grammatical errors in the user's query to ensure the search engine can retrieve accurate and relevant documents.
+        The goal is to produce an accurate and effective query that can be used to retrieve relevant related documents from the vector database.
+        
+        **User Query:**
+        ${variable.user-query}
+        
+        Reformulated Query:
+      response-format:
+        type: text
+      system-message: |-
+        You are a smart and helpful prompt engineer and expert at revising user queries for vector database search.
+      temperature: 0.1
+      top-p: 0.9
+  retrieve-from-catalog:
+    type: instill-artifact
+    task: TASK_RETRIEVE
+    input:
+      catalog-id: ${variable.catalog-name}
+      namespace: ${variable.namespace}
+      text-prompt: ${query-revisor.output.texts[0]}
+      top-k: ${variable.top-k}
+  retrieval-evaluation:
+    type: openai
+    input:
+      model: gpt-4o-mini
+      prompt: |-
+        Determine whether the information in the provided context is sufficient to answer the user query.
+
+        **Context:**
+        ${retrieve-from-catalog.output.chunks}
+
+        **User Query:**
+        ${variable.user-query}
+      system-message: You are a helpful assistant.
+      temperature: 0
+      n: 1
+      response-format:
+        json-schema: |
+          {
+              "name": "evaluation",
+              "strict": true,
+              "schema": {
+                  "type": "object",
+                  "properties": {
+                      "sufficientInfo": {
+                          "type": "boolean",
+                          "description": "Whether the chunks contain sufficient information to answer the user query."
+                      },
+                      "searchQuery": {
+                          "type": "string",
+                          "description": "A Google Search query to use to collect relevant information to answer the user query."
+                      }
+                  },
+                  "required": [
+                      "sufficientInfo",
+                      "searchQuery"
+                  ],
+                  "additionalProperties": false
+              }
+          }
+        type: json_schema
+      top-p: 1
+    task: TASK_TEXT_GENERATION
+  text-to-json:
+    type: json
+    task: TASK_UNMARSHAL
+    input:
+      string: ${retrieval-evaluation.output.texts[0]}
+  google-search:
+    type: google-search
+    input:
+      query: ${text-to-json.output.json.searchQuery}
+      top-k: 1
+      include-link-text: true
+    condition: ${text-to-json.output.json.sufficientInfo} == false
+    setup: ${connection.google-search}
+    task: TASK_SEARCH
+  generate-catalog-response:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      n: 1
+      prompt: |-
+        You are an accurate and reliable AI assistant capable of answering questions using external documents.
+        Always be faithful to the provided documents and leverage relevant, accurate information from them as much as possible.
+        Be aware that external documents might contain noisy or factually incorrect data.
+        Apply critical reasoning to discern and use the correct information from these sources.
+        If the question cannot be answered based on the context and user's questions/instructions at all, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for the specified Catalog.
+
+        **Context:**
+        ${retrieve-from-catalog.output.chunks}
+
+        **User Query:**
+        ${variable.user-query}
+
+        Now, generate your final response based on the given instructions and context to answer the user's query:
+      response-format:
+        type: text
+      system-message: |-
+        You are a smart and helpful Q&A agent, assisting users by accurately answering their questions based on the provided context.
+        Follow these steps and instructions to generate your response:
+
+        1. Carefully review the user's query and the provided context.
+        2. Break down the user's query into smaller, manageable parts if necessary.
+        3. For each part of the question:
+        a. Select the most relevant information from the context.
+        b. Make reasonable inferences based on the given context, but do not go beyond the provided information.
+        4. Draft a response using the selected information, ensuring the level of detail is appropriate for the user's expertise.
+        5. Remove any duplicate content from the draft response.
+        6. Adjust the draft to increase accuracy and relevance.
+        7. Do not include instructions' explanations or details in your final response.
+        8. If the question cannot be answered based on the provided context, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for the specified Catalog.
+      temperature: 0.1
+      top-p: 0.9
+    condition: ${text-to-json.output.json.sufficientInfo} == true
+  generate-web-response:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      n: 1
+      prompt: |-
+        You are an accurate and reliable AI assistant capable of answering questions using external context.
+        Always be faithful to the provided context and leverage relevant, accurate information from them as much as possible.
+        Be aware that external context might contain noisy or factually incorrect data.
+        Apply critical reasoning to discern and use the correct information from these sources.
+        If the question cannot be answered based on the context and user's questions/instructions at all, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for scraped website.
+
+        **Context:**
+        ${google-search.output.results[0].link-text}
+
+        **User Query:**
+        ${variable.user-query}
+
+        Now, generate your final response based on the given instructions and context to answer the user's query:
+      response-format:
+        type: text
+      system-message: |-
+        You are a smart and helpful Q&A agent, assisting users by accurately answering their questions based on the provided context.
+        Follow these steps and instructions to generate your response:
+
+        1. Carefully review the user's query and the provided context.
+        2. Break down the user's query into smaller, manageable parts if necessary.
+        3. For each part of the question:
+        a. Select the most relevant information from the context.
+        b. Make reasonable inferences based on the given context, but do not go beyond the provided information.
+        4. Draft a response using the selected information, ensuring the level of detail is appropriate for the user's expertise.
+        5. Remove any duplicate content from the draft response.
+        6. Adjust the draft to increase accuracy and relevance.
+        7. Do not include instructions' explanations or details in your final response.
+        8. If the question cannot be answered based on the provided context, use your existing knowledge to generate a relevant response, but provide a warning to the user at the end stating that the query was out of context for the scraped website.
+      temperature: 0.1
+      top-p: 0.9
+    condition: ${text-to-json.output.json.sufficientInfo} == false
+output:
+  catalog-response:
+    title: Catalog Response
+    value: ${generate-catalog-response.output.texts[0]}
+    instill-ui-order: 1
+  web-response:
+    title: Web Response
+    value: ${generate-web-response.output.texts[0]}
+    instill-ui-order: 2
+  decision:
+    title: Decision
+    value: ${text-to-json.output.json}
+    instill-ui-order: 3
+  revised-query:
+    title: Revised Query
+    value: ${query-revisor.output.texts[0]}
+    instill-ui-order: 4
+  retrieved-chunks:
+    title: Retrieved Chunks
+    value: ${retrieve-from-catalog.output.chunks}
+    instill-ui-order: 5

@@ -1,0 +1,70 @@
+version: v1beta
+variable:
+  file-1:
+    title: Document 1
+    type: file
+  file-2:
+    title: Document 2
+    type: file
+component:
+  process-document-1:
+    type: document
+    input:
+      document: ${variable.file-1}
+      display-image-tag: true
+    task: TASK_CONVERT_TO_MARKDOWN
+  process-document-2:
+    type: document
+    input:
+      document: ${variable.file-2}
+      display-image-tag: true
+    task: TASK_CONVERT_TO_MARKDOWN
+  semantic-diff:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      n: 1
+      prompt: |-
+        Evaluate the semantic, contextual difference between the two documents.
+
+        **Document 1**:
+        ${process-document-1.output.body}
+
+        **Document 2**:
+        ${process-document-2.output.body}
+
+        Semantic difference between documents:
+      response-format:
+        type: text
+      system-message: |-
+        You are an AI assistant tasked with identifying **semantic contextual differences** between two versions of a document.
+        These documents may be reports, regulations, or other forms of textual content that undergo revisions or periodic updates.
+        Your goal is to provide a meaningful comparison that captures the changes in **underlying meaning** or **intent**, rather than merely identifying word-by-word differences.
+        
+        ## Instructions:
+        1. **Understand the Overall Context:** 
+          - First, analyze each document to understand its overall theme, purpose, and key points. 
+          - Focus on major changes in meaning, emphasis, or structure, not just surface-level edits.
+        2. **Identify Key Semantic Differences:**
+          - Compare paragraphs or sections that discuss the same topic.
+          - Highlight where **new information has been added** or where **existing information has been modified** in a way that changes the meaning.
+          - If specific terms or concepts have been replaced, explain how this impacts the overall context (e.g., replacing \"guidelines\" with \"requirements\" could imply stricter enforcement).
+        3. **Locate the Positions of Changes:**
+          - For each identified semantic difference, specify the exact **location** in both documents (e.g., paragraph number, section heading, or line number).
+          - If multiple changes occur in the same section, clearly indicate each one and its relative position within that section.
+        4. **Ignore Superficial Changes:**
+          - Minor changes such as grammar corrections, punctuation, or rewording that do not alter the meaning should be disregarded unless they introduce significant shifts in tone or nuance.
+        5. **Summarize the Impact:**
+          - After identifying the key differences, summarize how the **semantic context** of the document has evolved.
+          - Provide insights into what these changes suggest about the intent, focus, or direction of the revised document.
+        6. **Output Format:**
+          - Present the comparison in a clear, organized manner, specifying both the **content** and **location** of each difference.
+          - Use bullet points, headings, or tables to make the comparison easy to follow.
+          - Include a **reference to the position** in both documents for each semantic difference (e.g., \"Section 2, Paragraph 3 in Document 1\" vs. \"Section 2, Paragraph 4 in Document 2\").
+      temperature: 0
+      top-p: 1
+output:
+  semantic-diff:
+    title: Semantic Difference
+    value: ${semantic-diff.output.texts[0]}

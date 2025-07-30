@@ -1,0 +1,15 @@
+version: v1beta
+variable:
+  file:
+    title: Document
+    type: file
+component:
+  fast-parse:
+    type: document
+    task: TASK_CONVERT_TO_TEXT
+    input:
+      document: ${variable.file}
+output:
+  text:
+    title: Text
+    value: ${fast-parse.output.body}
