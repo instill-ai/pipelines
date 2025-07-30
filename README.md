@@ -1,6 +1,6 @@
 # Instill Pipelines Collection
 
-A curated collection of production-ready AI pipeline recipes for [Instill Core CE](https://github.com/instill-ai/instill-core). Jump-start your AI applications with ready-to-use workflows for document processing, RAG systems, web automation, and business process automation.
+A curated collection of production-ready AI pipeline recipes for [Instill Core CE](https://github.com/instill-ai/instill-core). Jump-start your AI applications with ready-to-use workflows for document processing, RAG systems, web automation, financial analysis, and business process automation.
 
 ## Prerequisites
 
@@ -17,6 +17,15 @@ A curated collection of production-ready AI pipeline recipes for [Instill Core C
 5. **Run and customize** the pipeline in the console for your use case
 
 ## Pipeline Categories
+
+### 💰 **Financial Analysis & Monitoring**
+
+Comprehensive financial analysis and monitoring solutions for personal and business finance.
+
+- **`bank-account-aggregator.yaml`** - Simple aggregation of multiple bank statements
+- **`multi-bank-financial-report.yaml`** - Comprehensive financial reporting across institutions
+- **`financial-health-check.yaml`** - Financial health assessment and analysis
+- **`monthly-financial-health-monitor.yaml`** - Monthly monitoring for lending companies
 
 ### 🤖 **RAG (Retrieval-Augmented Generation)**
 

@@ -1,0 +1,337 @@
+version: v1beta
+
+variable:
+  financial_statements:
+    title: Financial Statements
+    description: Upload client's financial statements for monthly health monitoring (bank statements, income statements, balance sheets, etc.)
+    type: array:file
+
+  lending_criteria:
+    title: Lending Criteria
+    description: Specific lending criteria to evaluate (e.g., "Minimum monthly income $5000", "Debt-to-income ratio < 40%"). Use "Use industry best practices" to apply standard lending standards.
+    type: string
+    default: "Use industry best practices"
+
+component:
+  # Step 1: Process each financial statement individually
+  process_statements:
+    type: iterator
+    input: ${variable.financial_statements}
+    component:
+      # Convert document to text/markdown
+      statement-to-text:
+        type: document
+        task: TASK_CONVERT_TO_MARKDOWN
+        input:
+          document: ${process_statements.element}
+
+      # Extract financial data using AI
+      extract_financial_data:
+        type: openai
+        task: TASK_TEXT_GENERATION
+        input:
+          model: gpt-4o
+          prompt: |-
+            Analyze this financial statement and extract all relevant financial information for lending risk assessment.
+
+            **Financial Statement Content:**
+            ${statement-to-text.output.body}
+
+            **Extraction Requirements:**
+            1. **Client Information:**
+               - Client/account holder name
+               - Entity type (individual, business, etc.)
+               - Statement period and dates
+
+            2. **Income Information:**
+               - Monthly/annual income
+               - Income sources and stability
+               - Income trends and patterns
+
+            3. **Expense Analysis:**
+               - Monthly expenses breakdown
+               - Fixed vs. variable expenses
+               - Debt obligations and payments
+
+            4. **Asset and Liability Assessment:**
+               - Total assets and their liquidity
+               - Total liabilities and debt structure
+               - Net worth calculation
+
+            5. **Cash Flow Analysis:**
+               - Monthly cash flow patterns
+               - Savings rate and emergency funds
+               - Discretionary income
+
+            6. **Risk Indicators:**
+               - Late payments or overdrafts
+               - Unusual spending patterns
+               - Income volatility
+
+            Provide a structured analysis focused on lending risk assessment:
+          response-format:
+            type: text
+          system-message: |-
+            You are a senior credit analyst specializing in financial risk assessment for lending institutions. Your task is to extract and analyze financial information that directly impacts lending decisions and risk evaluation.
+
+            **Key Responsibilities:**
+            1. **Risk-Focused Analysis:** Identify factors that affect creditworthiness and repayment ability
+            2. **Income Stability Assessment:** Evaluate income consistency and reliability
+            3. **Debt Burden Analysis:** Assess current debt levels and payment capacity
+            4. **Cash Flow Evaluation:** Determine ability to meet new debt obligations
+            5. **Red Flag Identification:** Spot potential risk indicators and concerning patterns
+
+            **Best Practices:**
+            - Focus on quantifiable metrics relevant to lending decisions
+            - Identify trends that could impact future financial stability
+            - Assess both current financial position and future capacity
+            - Flag any concerning patterns or risk indicators
+            - Provide clear risk assessment with supporting data
+          temperature: 0.1
+          top-p: 0.9
+
+    output-elements:
+      statement_analysis: ${extract_financial_data.output.texts[0]}
+      original_text: ${statement-to-text.output.body}
+
+  # Step 2: Comprehensive financial health assessment
+  assess_financial_health:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Conduct a comprehensive financial health assessment for lending risk evaluation based on the client's financial statements.
+
+        **Lending Criteria:** ${variable.lending_criteria}
+
+        **Note:** If the lending criteria is set to "Use industry best practices", apply standard lending standards including debt-to-income ratio < 40%, minimum monthly income requirements, cash flow adequacy standards, and asset quality benchmarks.
+
+        **Individual Statement Analyses:**
+        ${process_statements.output.statement_analysis}
+
+        **Assessment Requirements:**
+        1. **Client Identification:**
+           - Extract client name from the statements
+           - Identify entity type (individual, business, etc.)
+           - Note any discrepancies in client names across statements
+
+        2. **Income Stability Assessment:**
+           - Income consistency and reliability
+           - Multiple income sources evaluation
+           - Income growth or decline trends
+
+        2. **Debt-to-Income Analysis:**
+           - Current debt-to-income ratio calculation
+           - Debt service coverage ratio
+           - Capacity for additional debt
+
+        3. **Cash Flow Evaluation:**
+           - Monthly cash flow stability
+           - Discretionary income analysis
+           - Emergency fund adequacy
+
+        4. **Asset Quality Assessment:**
+           - Liquid vs. illiquid assets
+           - Asset diversification
+           - Collateral value assessment
+
+        5. **Risk Factor Analysis:**
+           - Payment history and patterns
+           - Financial behavior indicators
+           - Potential red flags
+
+        6. **Lending Criteria Compliance:**
+           - Evaluation against specified criteria (or industry best practices if not specified)
+           - Gap analysis for non-compliance
+           - Recommendations for improvement
+
+        Provide a comprehensive financial health assessment with risk scoring:
+      response-format:
+        type: text
+      system-message: |-
+        You are a senior credit risk analyst with expertise in financial health monitoring and lending risk assessment. Your role is to provide comprehensive financial health evaluations that support lending decisions.
+
+        **Analysis Approach:**
+        1. **Risk-Based Assessment:** Focus on factors that directly impact creditworthiness
+        2. **Quantitative Analysis:** Provide specific metrics and ratios
+        3. **Trend Analysis:** Identify patterns that could affect future stability
+        4. **Comparative Evaluation:** Assess against industry standards and lending criteria (use expert judgment if criteria not specified)
+        5. **Actionable Insights:** Provide specific recommendations for risk mitigation
+
+        **Key Metrics to Calculate:**
+        - Debt-to-income ratio and debt service coverage
+        - Income stability and growth metrics
+        - Cash flow adequacy and discretionary income
+        - Asset quality and liquidity ratios
+        - Risk indicators and red flags
+
+        **Quality Standards:**
+        - Provide objective, data-driven analysis
+        - Identify both strengths and risk factors
+        - Offer specific, actionable recommendations
+        - Maintain professional, unbiased assessment
+        - Consider both current position and future capacity
+      temperature: 0.2
+      top-p: 0.9
+
+  # Step 3: Generate risk assessment report
+  generate_risk_report:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Generate a professional monthly financial health monitoring report for lending risk assessment.
+
+        **Lending Criteria:** ${variable.lending_criteria}
+
+        **Note:** If the lending criteria is set to "Use industry best practices", apply standard lending standards including debt-to-income ratio < 40%, minimum monthly income requirements, cash flow adequacy standards, and asset quality benchmarks.
+        **Financial Health Assessment:** ${assess_financial_health.output.texts[0]}
+
+        **Report Requirements:**
+        1. **Client Information:**
+           - Client name (extracted from statements)
+           - Entity type and structure
+           - Statement period covered
+
+        2. **Executive Summary:**
+           - Overall financial health score
+           - Key risk indicators
+           - Lending recommendation
+
+        2. **Financial Position Overview:**
+           - Income stability assessment
+           - Debt burden analysis
+           - Cash flow evaluation
+           - Asset quality review
+
+        3. **Risk Assessment:**
+           - Risk factors identified
+           - Risk level classification (Low/Medium/High)
+           - Specific risk explanations
+           - Mitigation recommendations
+
+        4. **Lending Criteria Evaluation:**
+           - Compliance with specified criteria (or industry best practices if not specified)
+           - Gap analysis for non-compliance
+           - Recommendations for improvement
+           - Conditional approval suggestions
+
+        5. **Monthly Trends:**
+           - Changes from previous month
+           - Trend analysis and projections
+           - Early warning indicators
+
+        6. **Recommendations:**
+           - Risk mitigation strategies
+           - Client improvement suggestions
+           - Monitoring frequency recommendations
+
+        **Report Format:**
+        - Professional, lending-focused presentation
+        - Clear risk indicators and scoring
+        - Actionable recommendations
+        - Compliance-focused analysis
+        - Executive-level summary
+
+        Generate the complete monthly financial health monitoring report:
+      response-format:
+        type: text
+      system-message: |-
+        You are a senior credit risk manager and report writer specializing in financial health monitoring for lending institutions. Your task is to create comprehensive, professional reports that support lending decisions and risk management.
+
+        **Report Writing Standards:**
+        1. **Risk-Focused:** Emphasize factors that impact lending decisions
+        2. **Executive Summary:** Start with key risk indicators and recommendations
+        3. **Quantitative Analysis:** Include specific metrics and ratios
+        4. **Actionable Insights:** Provide clear, implementable recommendations
+        5. **Compliance Focus:** Highlight lending criteria compliance and gaps (use industry best practices if criteria not specified)
+        6. **Professional Tone:** Use appropriate language for financial institutions
+
+        **Key Principles:**
+        - Focus on risk factors that affect creditworthiness
+        - Provide clear lending recommendations
+        - Include specific metrics and data points
+        - Offer actionable risk mitigation strategies
+        - Maintain objectivity and professional standards
+        - Consider both current assessment and future projections
+      temperature: 0.3
+      top-p: 0.9
+
+  # Step 4: Generate risk alert summary
+  generate_risk_alerts:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Create a concise risk alert summary for immediate attention by lending officers.
+
+        **Financial Health Assessment:** ${assess_financial_health.output.texts[0]}
+
+        **Risk Alert Requirements:**
+        1. **Client Identification:**
+           - Client name (extracted from financial statements)
+           - Entity type and structure
+
+        2. **Risk Level Classification:**
+           - Overall risk level (Low/Medium/High/Critical)
+           - Risk trend (Improving/Stable/Declining)
+           - Urgency level for action
+
+        2. **Key Risk Indicators:**
+           - Top 3 risk factors requiring attention
+           - Specific metrics that triggered alerts
+           - Comparison to previous month
+
+        3. **Immediate Actions Required:**
+           - Specific actions for lending officers
+           - Timeline for follow-up
+           - Escalation requirements
+
+        4. **Client Communication Points:**
+           - Key points for client discussions
+           - Improvement recommendations
+           - Support resources
+
+        Provide a concise, action-oriented risk alert summary:
+      response-format:
+        type: text
+      system-message: |-
+        You are a senior credit risk officer creating risk alerts for lending institutions. Your task is to distill complex financial analysis into clear, actionable risk alerts that require immediate attention.
+
+        **Risk Alert Guidelines:**
+        1. **Concise and Clear:** Present critical information in 1-2 paragraphs
+        2. **Action-Oriented:** Focus on what needs to be done immediately
+        3. **Risk-Focused:** Highlight only the most important risk factors
+        4. **Professional Tone:** Use appropriate language for financial institutions
+        5. **Urgency Indicators:** Clearly indicate if immediate action is required
+        6. **Specific Recommendations:** Provide actionable next steps
+
+        **Format:**
+        - Start with risk level and urgency
+        - Include key risk indicators
+        - Provide specific action items
+        - End with client communication points
+        - Keep total length to 1 page maximum
+      temperature: 0.2
+      top-p: 0.9
+
+output:
+  risk_alerts:
+    title: Risk Alerts
+    value: ${generate_risk_alerts.output.texts[0]}
+    instill-ui-order: 1
+  monthly_report:
+    title: Monthly Financial Health Report
+    value: ${generate_risk_report.output.texts[0]}
+    instill-ui-order: 2
+  financial_health_assessment:
+    title: Financial Health Assessment
+    value: ${assess_financial_health.output.texts[0]}
+    instill-ui-order: 3
+  individual_statements:
+    title: Individual Statement Analysis
+    value: ${process_statements.output.statement_analysis}
+    instill-ui-order: 4

@@ -1,0 +1,310 @@
+version: v1beta
+
+variable:
+  bank_statements:
+    title: Bank Statements
+    description: Upload multiple bank statements from different financial institutions (PDF, CSV, etc.)
+    type: array:file
+
+component:
+  # Step 1: Process each bank statement individually
+  process_statements:
+    type: iterator
+    input: ${variable.bank_statements}
+    component:
+      # Convert document to text/markdown
+      statement-to-text:
+        type: document
+        task: TASK_CONVERT_TO_MARKDOWN
+        input:
+          document: ${process_statements.element}
+
+      # Extract financial data using AI
+      extract_financial_data:
+        type: openai
+        task: TASK_TEXT_GENERATION
+        input:
+          model: gpt-4o
+          prompt: |-
+            Analyze this bank statement and extract all relevant financial information in a clear, structured format.
+
+            **Bank Statement Content:**
+            ${statement-to-text.output.body}
+
+            **Extraction Requirements:**
+            1. **Account Information:**
+               - Bank/Institution name
+               - Account holder name
+               - Account number (masked for security)
+               - Account type (checking, savings, credit, etc.)
+               - Statement period (start and end dates)
+
+            2. **Balance Information:**
+               - Opening balance
+               - Closing balance
+               - Available balance
+               - Pending transactions (if any)
+
+            3. **Transaction Summary:**
+               - Total deposits/credits
+               - Total withdrawals/debits
+               - Net change
+               - Number of transactions
+               - Key transaction categories
+
+            4. **Additional Information:**
+               - Interest earned/paid
+               - Fees charged
+               - Any special notes or alerts
+
+            Provide a clear, structured analysis of this bank statement:
+          response-format:
+            type: text
+          system-message: |-
+            You are a financial data extraction expert with deep knowledge of bank statements and financial documents. Your task is to accurately extract and present financial information from bank statements in a clear, structured format.
+
+            **Key Responsibilities:**
+            1. **Accuracy First:** Ensure all numerical data is extracted correctly with proper decimal places and signs
+            2. **Comprehensive Coverage:** Extract all available financial information, including transactions, balances, and metadata
+            3. **Clear Presentation:** Present information in a structured, easy-to-read format
+            4. **Security:** Mask sensitive information like full account numbers
+            5. **Quality Assessment:** Note any unclear or ambiguous data
+
+            **Best Practices:**
+            - Handle various statement formats and layouts
+            - Account for different date formats and currencies
+            - Present information in a logical, structured manner
+            - Flag any unclear or ambiguous data
+            - Provide clear summaries and insights
+          temperature: 0.1
+          top-p: 0.9
+
+    output-elements:
+      statement_analysis: ${extract_financial_data.output.texts[0]}
+      original_text: ${statement-to-text.output.body}
+
+  # Step 2: Aggregate all statement data
+  aggregate_financial_data:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Aggregate and analyze the financial data from multiple bank statements to create a comprehensive financial overview.
+
+        **Individual Statement Analyses:**
+        ${process_statements.output.statement_analysis}
+
+        **Aggregation Requirements:**
+        1. **Consolidated Balances:**
+           - Total combined balances across all accounts
+           - Balance distribution by account type
+           - Net worth calculation
+
+        2. **Transaction Analysis:**
+           - Combined transaction volume and amounts
+           - Top spending categories
+           - Income sources analysis
+           - Recurring transaction identification
+           - Unusual transaction patterns
+
+        3. **Financial Health Indicators:**
+           - Cash flow analysis
+           - Savings rate calculation
+           - Expense-to-income ratio
+           - Account utilization patterns
+
+        4. **Cross-Account Insights:**
+           - Transfer patterns between accounts
+           - Account diversification analysis
+           - Risk assessment based on account types
+
+        Provide a comprehensive consolidated financial analysis:
+      response-format:
+        type: text
+      system-message: |-
+        You are a senior financial analyst with expertise in personal finance, wealth management, and financial planning. Your role is to provide comprehensive financial analysis and insights based on aggregated bank statement data.
+
+        **Analysis Approach:**
+        1. **Holistic View:** Consider the complete financial picture across all accounts
+        2. **Pattern Recognition:** Identify spending patterns, income sources, and financial behaviors
+        3. **Risk Assessment:** Evaluate financial health and identify potential risks
+        4. **Opportunity Identification:** Highlight areas for improvement and optimization
+        5. **Actionable Insights:** Provide specific, actionable recommendations
+
+        **Key Metrics to Calculate:**
+        - Net worth and asset allocation
+        - Cash flow analysis and trends
+        - Savings and spending patterns
+        - Financial health indicators
+        - Risk assessment and recommendations
+
+        **Quality Standards:**
+        - Ensure all calculations are mathematically accurate
+        - Provide context for all metrics and ratios
+        - Identify both positive trends and areas of concern
+        - Offer practical, actionable recommendations
+        - Maintain professional, objective analysis
+      temperature: 0.2
+      top-p: 0.9
+
+  # Step 3: Generate comprehensive financial report
+  generate_financial_report:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Generate a comprehensive, professional financial report based on the aggregated bank statement analysis.
+
+        **Aggregated Financial Analysis:**
+        ${aggregate_financial_data.output.texts[0]}
+
+        **Report Requirements:**
+        1. **Executive Summary:**
+           - Key financial highlights
+           - Overall financial health assessment
+           - Net worth summary
+           - Cash flow overview
+
+        2. **Account Overview:**
+           - Summary of all accounts and institutions
+           - Balance distribution analysis
+           - Account type diversification
+
+        3. **Income Analysis:**
+           - Total income breakdown
+           - Income sources and patterns
+           - Income stability assessment
+
+        4. **Expense Analysis:**
+           - Spending patterns and categories
+           - Top expense categories
+           - Budget vs. actual analysis
+           - Recurring expenses identification
+
+        5. **Cash Flow Analysis:**
+           - Monthly cash flow trends
+           - Savings rate analysis
+           - Emergency fund assessment
+
+        6. **Financial Health Metrics:**
+           - Key financial ratios
+           - Debt-to-income analysis
+           - Savings and investment patterns
+
+        7. **Insights and Recommendations:**
+           - Key findings and observations
+           - Areas for improvement
+           - Financial planning recommendations
+           - Risk management suggestions
+
+        8. **Charts and Visualizations:**
+           - Describe recommended charts and graphs
+           - Data visualization suggestions
+
+        **Report Format:**
+        - Professional, executive-level presentation
+        - Clear sections with headings and subheadings
+        - Use tables for numerical data
+        - Include actionable insights and recommendations
+        - Maintain confidentiality and security awareness
+
+        Generate the complete financial report:
+      response-format:
+        type: text
+      system-message: |-
+        You are a senior financial advisor and report writer with expertise in personal finance, wealth management, and financial planning. Your task is to create comprehensive, professional financial reports that provide clear insights and actionable recommendations.
+
+        **Report Writing Standards:**
+        1. **Professional Tone:** Use clear, professional language appropriate for financial reporting
+        2. **Executive Summary:** Start with a compelling executive summary that captures key insights
+        3. **Structured Analysis:** Organize information logically with clear sections and subsections
+        4. **Data Presentation:** Use tables, bullet points, and formatting to make data easily digestible
+        5. **Actionable Insights:** Provide specific, actionable recommendations based on the analysis
+        6. **Risk Awareness:** Include appropriate disclaimers and risk considerations
+        7. **Visual Elements:** Suggest appropriate charts and visualizations when requested
+
+        **Key Principles:**
+        - Focus on insights that drive decision-making
+        - Present both positive trends and areas of concern
+        - Provide context for all metrics and ratios
+        - Include practical recommendations for improvement
+        - Maintain objectivity and professional standards
+        - Consider the client's financial goals and circumstances
+      temperature: 0.3
+      top-p: 0.9
+
+  # Step 4: Generate executive summary
+  generate_executive_summary:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Create a concise executive summary of the financial analysis for quick reference.
+
+        **Aggregated Financial Analysis:**
+        ${aggregate_financial_data.output.texts[0]}
+
+        **Executive Summary Requirements:**
+        1. **Key Financial Metrics:**
+           - Total net worth
+           - Net cash flow
+           - Savings rate
+           - Top 3 financial highlights
+
+        2. **Financial Health Score:**
+           - Overall assessment (Excellent/Good/Fair/Needs Attention)
+           - Key strengths
+           - Primary areas of concern
+
+        3. **Top 3 Recommendations:**
+           - Most important actionable items
+           - Priority level for each recommendation
+
+        4. **Quick Stats:**
+           - Number of accounts analyzed
+           - Total transactions processed
+           - Income vs. expense summary
+
+        Provide a concise, executive-level summary:
+      response-format:
+        type: text
+      system-message: |-
+        You are a senior financial advisor creating executive summaries for busy professionals. Your task is to distill complex financial analysis into clear, actionable insights that can be quickly understood and acted upon.
+
+        **Executive Summary Guidelines:**
+        1. **Concise and Clear:** Present key information in 2-3 paragraphs maximum
+        2. **Action-Oriented:** Focus on what matters most for decision-making
+        3. **Professional Tone:** Use executive-level language and presentation
+        4. **Key Metrics:** Highlight the most important financial indicators
+        5. **Clear Recommendations:** Provide specific, actionable next steps
+        6. **Risk Awareness:** Include any critical concerns that need immediate attention
+
+        **Format:**
+        - Start with overall financial health assessment
+        - Include key metrics and trends
+        - End with top 3 actionable recommendations
+        - Use bullet points for easy scanning
+        - Keep total length to 1-2 pages maximum
+      temperature: 0.2
+      top-p: 0.9
+
+output:
+  executive_summary:
+    title: Executive Summary
+    value: ${generate_executive_summary.output.texts[0]}
+    instill-ui-order: 1
+  comprehensive_report:
+    title: Comprehensive Financial Report
+    value: ${generate_financial_report.output.texts[0]}
+    instill-ui-order: 2
+  aggregated_analysis:
+    title: Aggregated Financial Analysis
+    value: ${aggregate_financial_data.output.texts[0]}
+    instill-ui-order: 3
+  individual_statements:
+    title: Individual Statement Analysis
+    value: ${process_statements.output.statement_analysis}
+    instill-ui-order: 4

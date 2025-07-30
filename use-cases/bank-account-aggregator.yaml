@@ -1,0 +1,194 @@
+version: v1beta
+
+variable:
+  bank_statements:
+    title: Bank Statements
+    description: Upload multiple bank statements from different financial institutions (PDF, CSV, etc.)
+    type: array:file
+
+component:
+  # Step 1: Process each bank statement individually
+  process_statements:
+    type: iterator
+    input: ${variable.bank_statements}
+    component:
+      # Convert document to text/markdown
+      statement-to-text:
+        type: document
+        task: TASK_CONVERT_TO_MARKDOWN
+        input:
+          document: ${process_statements.element}
+
+      # Extract account details using AI
+      extract_account_details:
+        type: openai
+        task: TASK_TEXT_GENERATION
+        input:
+          model: gpt-4o
+          prompt: |-
+            Extract key account information from this bank statement in a structured format.
+
+            **Bank Statement Content:**
+            ${statement-to-text.output.body}
+
+            **Extraction Requirements:**
+            1. **Bank Information:**
+               - Bank/Institution name
+               - Account holder name
+               - Account number (masked for security, show last 4 digits only)
+               - Account type (checking, savings, credit, etc.)
+
+            2. **Statement Period:**
+               - Statement start date
+               - Statement end date
+
+            3. **Balance Information:**
+               - Opening balance
+               - Closing balance
+               - Available balance
+
+            4. **Transaction Summary:**
+               - Total deposits/credits
+               - Total withdrawals/debits
+               - Net change for the period
+
+            Format the information clearly and consistently:
+          response-format:
+            type: text
+          system-message: |-
+            You are a financial data extraction specialist. Extract only the essential account information in a clear, structured format.
+
+            **Key Requirements:**
+            1. **Accuracy:** Ensure all numerical data is correct
+            2. **Security:** Mask account numbers (show only last 4 digits)
+            3. **Consistency:** Use consistent formatting across all statements
+            4. **Clarity:** Present information in an easy-to-read format
+            5. **Completeness:** Extract all required fields
+
+            **Format Guidelines:**
+            - Use clear headings for each section
+            - Present numerical data with proper formatting
+            - Include all required information fields
+            - Maintain professional presentation
+          temperature: 0.1
+          top-p: 0.9
+
+    output-elements:
+      account_details: ${extract_account_details.output.texts[0]}
+      original_text: ${statement-to-text.output.body}
+
+  # Step 2: Calculate aggregated numbers
+  calculate_aggregated_numbers:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Calculate aggregated numbers based on the account details from multiple bank statements.
+
+        **Individual Account Details:**
+        ${process_statements.output.account_details}
+
+        **Calculate These Aggregated Numbers:**
+        1. **Total Balances:**
+           - Sum of all closing balances across accounts
+           - Breakdown by account type
+
+        2. **Transaction Totals:**
+           - Total deposits across all accounts
+           - Total withdrawals across all accounts
+           - Net change (deposits - withdrawals)
+
+        3. **Account Summary:**
+           - Number of different banks/institutions
+           - Distribution across account types
+           - Total number of accounts
+
+        4. **Balance Distribution:**
+           - Total liquid assets (checking + savings)
+           - Credit account balances (if any)
+           - Balance by institution
+
+        Provide a concise summary with the key aggregated numbers:
+      response-format:
+        type: text
+      system-message: |-
+        You are a financial data analyst. Calculate and present aggregated numbers in a clear, organized format.
+
+        **Analysis Focus:**
+        1. **Key Numbers:** Focus on the most important aggregated totals
+        2. **Clear Presentation:** Present numbers in an easy-to-read format
+        3. **Accurate Calculations:** Ensure all totals are mathematically correct
+        4. **Organized Summary:** Group related numbers logically
+
+        **Presentation Standards:**
+        - Use clear, bold numbers for key totals
+        - Provide brief context for each number
+        - Organize by categories (balances, transactions, accounts)
+        - Keep the summary concise and focused
+      temperature: 0.2
+      top-p: 0.9
+
+  # Step 3: Generate account summary table
+  generate_account_summary:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Create a clean, organized summary table of all individual accounts based on the extracted details.
+
+        **Individual Account Details:**
+        ${process_statements.output.account_details}
+
+        **Table Requirements:**
+        Create a table with these columns:
+        1. **Bank Name** - Financial institution name
+        2. **Account Type** - Checking, savings, credit, etc.
+        3. **Account Number** - Last 4 digits only (masked)
+        4. **Account Holder** - Name of account holder
+        5. **Period** - Statement period (start date - end date)
+        6. **End Balance** - Closing balance for the period
+
+        **Format Guidelines:**
+        - Use a clear table format
+        - Sort by bank name, then account type
+        - Include a total row at the bottom
+        - Ensure all data is properly formatted
+        - Keep it clean and professional
+
+        Generate the account summary table:
+      response-format:
+        type: text
+      system-message: |-
+        You are a financial data presentation specialist. Create clean, professional tables that clearly display account information.
+
+        **Table Standards:**
+        1. **Clear Headers:** Use descriptive column headers
+        2. **Consistent Formatting:** Apply uniform formatting throughout
+        3. **Logical Sorting:** Organize data in a logical sequence
+        4. **Professional Presentation:** Use appropriate spacing and alignment
+        5. **Security:** Ensure account numbers are properly masked
+
+        **Best Practices:**
+        - Use clear borders or separators
+        - Align numerical data properly
+        - Include totals where appropriate
+        - Maintain professional appearance
+        - Ensure readability and clarity
+      temperature: 0.1
+      top-p: 0.9
+
+output:
+  aggregated_numbers:
+    title: Aggregated Numbers Summary
+    value: ${calculate_aggregated_numbers.output.texts[0]}
+    instill-ui-order: 1
+  account_summary_table:
+    title: Account Details Summary
+    value: ${generate_account_summary.output.texts[0]}
+    instill-ui-order: 2
+  individual_accounts:
+    title: Individual Account Details
+    value: ${process_statements.output.account_details}
+    instill-ui-order: 3
