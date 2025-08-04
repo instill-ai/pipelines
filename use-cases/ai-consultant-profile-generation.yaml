@@ -1,0 +1,178 @@
+version: v1beta
+
+variable:
+  consultant_name:
+    title: Consultant Name
+    description: Name of the consultant to analyze
+    type: string
+    instill-ui-order: 1
+  linkedin_url:
+    title: LinkedIn URL
+    description: LinkedIn profile URL of the consultant
+    type: string
+    instill-ui-order: 2
+  video_url:
+    title: Video URL
+    description: URL to consultant's video content (presentation, interview, etc.)
+    type: string
+    instill-ui-order: 3
+  skills_list:
+    title: Skills List
+    description: List of skills to evaluate the consultant on
+    type: string
+    instill-ui-order: 4
+  domain:
+    title: Domain
+    description: Professional domain/industry of the consultant
+    type: string
+    instill-ui-order: 5
+  consultant_documents:
+    title: Consultant Documents
+    description: Upload multiple documents (PDFs, presentations, case studies, proposals, etc.)
+    type: array:file
+    instill-ui-order: 6
+
+component:
+  # Step 1: Process All Consultant Documents
+  process_documents:
+    type: iterator
+    input: ${variable.consultant_documents}
+    component:
+      # Convert document to text
+      document_to_text:
+        type: document
+        task: TASK_CONVERT_TO_MARKDOWN
+        input:
+          document: ${process_documents.element}
+          display-image-tag: false
+
+    output-elements:
+      document_text: ${document_to_text.output.body}
+
+  # Step 2: Get Consultant Information via Perplexity
+  get_consultant_info:
+    type: perplexity
+    setup: ${connection.perplexity}
+    task: TASK_CHAT
+    input:
+      data:
+        model: sonar-pro
+        messages:
+          - content:
+              - text: |-
+                  You are a professional consultant research specialist. Your task is to gather comprehensive information about a consultant based on their LinkedIn profile and any other publicly available information.
+                  Provide detailed, factual information about their professional background, experience, skills, achievements, and career progression.
+                  Focus on extracting concrete information rather than making assessments or evaluations.
+                type: text
+            role: system
+          - content:
+              - text: |-
+                  Please research and provide comprehensive information about this consultant: ${variable.consultant_name}. 
+                  LinkedIn profile: ${variable.linkedin_url}. 
+                  Domain/Industry: ${variable.domain}. 
+                  Skills to look for: ${variable.skills_list}. 
+                  Please provide detailed information about their professional background, experience, skills, achievements, career progression, and any other relevant professional information you can find.
+                type: text
+            role: user
+      parameter:
+        max-tokens: 2000
+        temperature: 0.1
+        top-p: 0.9
+        stream: false
+        top-k: 0
+        presence-penalty: 0
+        frequency-penalty: 0
+
+  # Step 3: Generate Final Human-Readable Report
+  generate_final_report:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    setup: ${connection.openai}
+    input:
+      model: gpt-4o
+      n: 1
+      prompt: |-
+        Generate a comprehensive, professional consultant evaluation report based on the extracted information.
+
+        **Available Information:**
+        - Consultant Name: ${variable.consultant_name}
+        - LinkedIn URL: ${variable.linkedin_url}
+        - Video URL: ${variable.video_url}
+        - Domain: ${variable.domain}
+        - Skills List: ${variable.skills_list}
+        - Document Texts: ${process_documents.output.document_text}
+        - Consultant Research Information: ${get_consultant_info.output.data.choices[0].message.content}
+
+        **Report Requirements:**
+        Create a comprehensive, human-readable consultant profile that seamlessly integrates information from all sources. The AI should:
+
+        1. **Intelligently analyze document content** and extract relevant professional information, skills, achievements, and insights
+        2. **Integrate document insights naturally** into the appropriate sections rather than listing documents separately
+        3. **Create a cohesive narrative** that flows from one section to the next
+        4. **Focus on content quality** and professional insights rather than document metadata
+        5. **Highlight specific examples** from documents that demonstrate skills and expertise
+        6. **Provide actionable insights** about the consultant's capabilities and fit
+
+        **Required Structure:**
+        ---
+        # [Consultant Name]
+
+        [Compelling 2-3 sentence overview highlighting key strengths, experience level, and unique value proposition based on all available information]
+
+        ## Professional Background
+        [Comprehensive career overview integrating research findings with document insights. Focus on progression, key roles, and notable achievements]
+
+        ## Industry Expertise & Specializations
+        [Domain knowledge and areas of specialization, supported by specific examples from documents and research]
+
+        ## Key Achievements & Project Highlights
+        [Notable accomplishments, successful projects, and measurable results. Include specific examples from documents when available]
+
+        ## Skills & Competencies
+        [Comprehensive skills assessment integrating target skills evaluation with additional competencies found. Include specific evidence and examples from documents]
+
+        ## Communication & Presentation Style
+        [Insights about communication effectiveness, presentation quality, and professional demeanor based on document analysis]
+
+        ## Additional Resources
+        - **Video Content:** [Video URL]
+        - **LinkedIn Profile:** [LinkedIn URL]
+
+        ## Summary
+        [Overall assessment with key strengths, potential fit, and professional standing]
+        ---
+
+        Follow this exact structure and formatting. Use consistent heading levels, bullet points, and formatting throughout.
+      response-format:
+        type: text
+      system-message: |-
+        You are a professional consultant information specialist creating comprehensive, human-readable profiles. Your reports must follow the exact template structure provided while delivering insightful, actionable content.
+
+        **Content Standards:**
+        1. **Intelligent Document Analysis:** Extract and integrate relevant insights from documents naturally into appropriate sections
+        2. **Cohesive Narrative:** Create a flowing, professional story that connects all information sources
+        3. **Specific Examples:** Include concrete examples from documents to support skills and achievements
+        4. **Professional Language:** Use clear, engaging, and professional language throughout
+        5. **Actionable Insights:** Provide meaningful assessments that help evaluate consultant fit
+        6. **Consistent Quality:** Maintain high standards of analysis and presentation across all profiles
+        7. **Human-Readable Format:** Write in a way that's engaging and easy to understand for decision-makers
+      temperature: 0.1
+      top-p: 0.8
+
+output:
+  final_consultant_report:
+    title: Final Consultant Evaluation Report
+    value: ${generate_final_report.output.texts[0]}
+    instill-ui-order: 1
+  document_texts:
+    title: Document Texts
+    value: ${process_documents.output.document_text}
+    instill-ui-order: 2
+  consultant_research_info:
+    title: Consultant Research Information
+    value: ${get_consultant_info.output.data.choices[0].message.content}
+    instill-ui-order: 3 
+  consultant_research_sources:
+    title: Consultant Research Sources
+    value: ${get_consultant_info.output.data.search-results}
+    instill-ui-order: 4
