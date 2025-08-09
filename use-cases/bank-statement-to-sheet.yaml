@@ -191,67 +191,105 @@ component:
 
         **CRITICAL DAILY BALANCE CALCULATION RULES:**
         
+        **CASH FLOW CONSISTENCY PRINCIPLE:**
+        - The balance shown for any date is ALWAYS the balance AFTER all transactions on that date
+        - The starting balance of any day MUST equal the ending balance of the previous day
+        - This creates a continuous cash flow across consecutive days
+        
         **STEP-BY-STEP ALGORITHM (FOLLOW EXACTLY):**
         
         1. **IDENTIFY KNOWN BALANCES**: Find all transaction dates with their resulting balances from the statement
         
         2. **SORT TRANSACTIONS**: Sort all transactions by date (earliest to latest)
         
-        3. **WORK BACKWARD FROM EACH TRANSACTION**:
-           - For each transaction, calculate what the balance was BEFORE that transaction
-           - DEBIT transaction: Balance_before = Balance_after + Transaction_amount
-           - CREDIT transaction: Balance_before = Balance_after - Transaction_amount
-           - This "balance_before" becomes the end balance for the day BEFORE the transaction date
+        3. **CALCULATE BOTH START AND END BALANCES FOR EACH DAY**:
+           - For each day, calculate both the STARTING balance and ENDING balance
+           - Starting balance = Previous day's ending balance
+           - Ending balance = Starting balance ± all transactions on that day
+           - For transaction dates: the balance shown is the ENDING balance (verify this matches your calculation)
         
-        4. **FILL IN GAPS**:
-           - For any day between transactions: use the balance from the most recent previous transaction
-           - For any day before the first transaction: use the balance before the first transaction
-           - For any day after the last transaction: use the balance after the last transaction
+        4. **HANDLE MULTIPLE TRANSACTIONS PER DAY**:
+           - For days with multiple transactions, process them in chronological order
+           - Starting balance = Previous day's ending balance
+           - After each transaction: New balance = Current balance ± Transaction amount
+           - Final balance should match the balance shown in the statement
         
-        5. **HANDLE MULTIPLE TRANSACTIONS PER DAY**:
-           - If multiple transactions occur on the same day, process them in chronological order
-           - Start with the final balance of that day
-           - Work backward through each transaction using the formula above
-           - The balance before the first transaction of that day becomes the end balance for the previous day
+        5. **FILL IN GAPS BETWEEN TRANSACTION DATES**:
+           - For days without transactions: Start balance = Previous day's end balance, End balance = Start balance
+           - This maintains cash flow consistency
+        
+        6. **VALIDATE CONSISTENCY DURING CALCULATION**:
+           - As you calculate each day, verify that the ending balance flows correctly to the next day's starting balance
+           - If there's a mismatch, investigate the transactions and recalculate
+           - The ending balance of any day MUST equal the starting balance of the next day
         
         **EXAMPLE WITH MULTIPLE SCENARIOS**:
         
         Scenario A - Single transaction:
         - 2025-04-25: $50 debit, resulting balance = $1000
-        - 2025-04-25 end balance = $1000
-        - 2025-04-24 end balance = $1000 + $50 = $1050 (balance before the debit)
+        - 2025-04-25: Start balance = $1050 (from previous day), End balance = $1000 (after $50 debit)
+        - 2025-04-26: Start balance = $1000 (from 2025-04-25 end balance)
         
         Scenario B - Multiple transactions on one day:
         - 2025-04-25: $50 debit, then $200 credit, final balance = $1000
-        - 2025-04-25 end balance = $1000
-        - Before $200 credit: $1000 + $200 = $1200
-        - Before $50 debit: $1200 + $50 = $1250
-        - 2025-04-24 end balance = $1250
+        - 2025-04-25: Start balance = $850, After $50 debit = $800, After $200 credit = $1000
+        - 2025-04-26: Start balance = $1000 (from 2025-04-25 end balance)
         
-        Scenario C - Sparse transactions:
-        - 2025-04-20: $200 credit, balance after transaction = $800
-        - 2025-04-25: $50 debit, balance after transaction = $750
-        - 2025-04-30: $100 debit, final balance = $650
-        - 2025-04-30 end balance = $650
-        - Before $100 debit on 2025-04-30: $650 + $100 = $750
-        - 2025-04-25 end balance = $750 (after the $50 debit)
-        - Before $50 debit on 2025-04-25: $750 + $50 = $800
-        - 2025-04-20 end balance = $800 (after the $200 credit)
-        - Before $200 credit on 2025-04-20: $800 - $200 = $600
-        - Days 2025-04-01 to 2025-04-19: end balance = $600 (before the first transaction)
-        - Days 2025-04-21 to 2025-04-24: end balance = $800 (after 2025-04-20 transaction)
-        - Days 2025-04-26 to 2025-04-29: end balance = $750 (after 2025-04-25 transaction)
+        Scenario C - Sparse transactions with start/end balance calculation:
+        - 2025-04-20: Start balance = $600, $200 credit, End balance = $800
+        - 2025-04-21: Start balance = $800, No transactions, End balance = $800
+        - 2025-04-22: Start balance = $800, No transactions, End balance = $800
+        - 2025-04-23: Start balance = $800, No transactions, End balance = $800
+        - 2025-04-24: Start balance = $800, No transactions, End balance = $800
+        - 2025-04-25: Start balance = $800, $50 debit, End balance = $750
+        - 2025-04-26: Start balance = $750, No transactions, End balance = $750
+        - 2025-04-30: Start balance = $750, $100 debit, End balance = $650
         
-        **CRITICAL**: Always work backward from known balances. Never assume a day's balance equals the previous day's balance unless there are no transactions.
+        Scenario D - Mixed sparse and multiple transactions:
+        - 2025-04-15: Start balance = $1000, $50 debit, End balance = $950
+        - 2025-04-16: Start balance = $950, No transactions, End balance = $950
+        - 2025-04-17: Start balance = $950, No transactions, End balance = $950
+        - 2025-04-18: Start balance = $950, $100 debit + $200 credit + $25 debit, End balance = $1025
+        - 2025-04-19: Start balance = $1025, No transactions, End balance = $1025
+        - 2025-04-20: Start balance = $1025, $300 credit, End balance = $1325
+        - 2025-04-21: Start balance = $1325, No transactions, End balance = $1325
+        - 2025-04-22: Start balance = $1325, $75 debit + $150 debit, End balance = $1100
+        
+        Scenario E - Complex real-world pattern:
+        - 2025-04-01: Start balance = $5000, $200 debit + $1000 credit + $50 debit, End balance = $5750
+        - 2025-04-02: Start balance = $5750, No transactions, End balance = $5750
+        - 2025-04-03: Start balance = $5750, $300 debit, End balance = $5450
+        - 2025-04-04: Start balance = $5450, No transactions, End balance = $5450
+        - 2025-04-05: Start balance = $5450, $150 debit + $500 credit + $75 debit + $200 debit, End balance = $5525
+        - 2025-04-06: Start balance = $5525, No transactions, End balance = $5525
+        - 2025-04-07: Start balance = $5525, $1000 debit, End balance = $4525
+        - 2025-04-08: Start balance = $4525, $250 credit, End balance = $4775
+        - 2025-04-09: Start balance = $4775, No transactions, End balance = $4775
+        - 2025-04-10: Start balance = $4775, $125 debit + $300 debit + $400 credit, End balance = $4750
+
+        **CONSISTENCY VALIDATION:**
+        - Each day's end balance flows to the next day's start balance
+        - If there's a mismatch, investigate the transactions
+        - This approach catches errors during calculation, not after
+        
+        **CRITICAL**: The balance shown for any date is the END balance for that day. Maintain cash flow consistency across consecutive days.
 
         **YOUR TASK:**
         Analyze the bank statement and extracted transaction data above. Follow the step-by-step algorithm to calculate daily end balances for each day of the statement period.
 
+        **CRITICAL REMINDERS:**
+        - Calculate BOTH start and end balances for each day
+        - Starting balance = Previous day's ending balance
+        - Ending balance = Starting balance ± all transactions on that day
+        - The balance shown in the statement is the ENDING balance (verify this matches your calculation)
+        - If there's a mismatch between your calculated end balance and the statement balance, investigate
+
         Provide your reasoning step by step, showing:
-        1. All transaction dates and their resulting balances
-        2. Your backward calculations for each transaction
-        3. How you fill in the gaps between transactions
-        4. The final list of daily end balances for each day of the statement period
+        1. For each day: Calculate start balance, process transactions, calculate end balance
+        2. Verify that each calculated end balance matches the statement balance
+        3. Ensure each day's end balance flows to the next day's start balance
+        4. If any inconsistencies are found, investigate and resolve them
+        5. The final list of daily end balances for each day of the statement period
 
         Format your final answer as a clear list of daily end balances with dates and amounts.
       temperature: 0.1
