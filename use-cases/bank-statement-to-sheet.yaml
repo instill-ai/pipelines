@@ -1,0 +1,423 @@
+version: v1beta
+
+variable:
+  # https://docs.google.com/spreadsheets/d/.../edit?usp=sharing
+  sheet-shared-link:
+    title: Sheets Link
+    description: The shared link to the Google Sheets document where data will be written
+    type: string
+    instill-ui-order: 1
+  sheet-name:
+    title: Sheet Name
+    description: The name of the specific sheet/tab in the Google Sheets document
+    type: string
+    instill-ui-order: 2
+  bank-statement:
+    title: Bank Statement
+    description: Upload a single bank statement (PDF, CSV, etc.) to extract structured financial data
+    type: file
+    instill-ui-order: 3
+
+component:
+  # Step 1: Convert document to text/markdown
+  statement-to-text:
+    type: document
+    task: TASK_CONVERT_TO_MARKDOWN
+    input:
+      document: ${variable.bank-statement}
+      converter: docling
+
+  # Step 2: Extract structured financial data using JSON schema (EXCLUDING dailyEndBalances)
+  extract-financial-data:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Extract key financial information from this bank statement in a structured format.
+
+        **CRITICAL: DO NOT make up, infer, or guess any information that is not explicitly stated in the statement. Only extract information that is clearly present in the document.**
+
+        **Extraction Requirements:**
+        Extract the following information accurately:
+        1. **month** - Statement period in format (mmm-yyyy)
+        2. **monthEndBalance** - Closing balance for the statement period (number)
+        3. **bank** - Name of the financial institution (string)
+        4. **currency** - Currency code in ISO 4217 format (e.g., USD, EUR, GBP, CAD, AUD, JPY, etc.)
+        5. **listOfDebitTransactions** - Array of all debit/withdrawal transactions with date, description, and amount
+        6. **listOfCreditTransactions** - Array of all credit/deposit transactions with date, description, and amount
+
+        **Important Notes:**
+        - Ensure all numerical values are extracted as numbers, not strings
+        - For month format, use mmm-yyyy (e.g., "Aug-2025" for August 2025) - 3-letter month abbreviation + 4-digit year
+        - For currency, use standard ISO 4217 currency codes (USD, EUR, GBP, CAD, AUD, JPY, etc.) - exactly 3 uppercase letters
+        - If multiple currencies are present, use the primary currency of the account
+        - Ensure all calculations are accurate and complete
+        - If any information is not available in the statement, use null for that field
+
+        **Bank Statement Content:**
+        ${statement-to-text.output.body}
+      response-format:
+        json-schema: |
+          {
+              "name": "bank_statement_data",
+              "strict": true,
+              "schema": {
+                  "type": "object",
+                  "properties": {
+                      "month": {
+                          "type": ["string", "null"],
+                          "description": "Statement period in mmm-yyyy format (e.g., 'Aug-2025') or null if not available"
+                      },
+
+                      "monthEndBalance": {
+                          "type": ["number", "null"],
+                          "description": "Closing balance at the end of the statement period or null if not available"
+                      },
+                      "bank": {
+                          "type": ["string", "null"],
+                          "description": "Name of the financial institution or null if not available"
+                      },
+                      "currency": {
+                          "type": ["string", "null"],
+                          "description": "Currency code in ISO 4217 format (e.g., USD, EUR, GBP, CAD, AUD, JPY) or null if not available"
+                      },
+                      "listOfDebitTransactions": {
+                          "type": "array",
+                          "description": "Array of all debit/withdrawal transactions with date, description, and amount",
+                          "items": {
+                              "type": "object",
+                              "properties": {
+                                  "date": {
+                                      "type": ["string", "null"],
+                                      "description": "Transaction date in YYYY-MM-DD format or null if not available"
+                                  },
+                                  "description": {
+                                      "type": ["string", "null"],
+                                      "description": "Transaction description or merchant name or null if not available"
+                                  },
+                                  "amount": {
+                                      "type": "number",
+                                      "description": "Transaction amount (positive number)"
+                                  }
+                              },
+                              "required": ["date", "description", "amount"],
+                              "additionalProperties": false
+                          }
+                      },
+                      "listOfCreditTransactions": {
+                          "type": "array",
+                          "description": "Array of all credit/deposit transactions with date, description, and amount",
+                          "items": {
+                              "type": "object",
+                              "properties": {
+                                  "date": {
+                                      "type": ["string", "null"],
+                                      "description": "Transaction date in YYYY-MM-DD format or null if not available"
+                                  },
+                                  "description": {
+                                      "type": ["string", "null"],
+                                      "description": "Transaction description or merchant name or null if not available"
+                                  },
+                                  "amount": {
+                                      "type": "number",
+                                      "description": "Transaction amount (positive number)"
+                                  }
+                              },
+                              "required": ["date", "description", "amount"],
+                              "additionalProperties": false
+                          }
+                      }
+                  },
+                  "required": [
+                      "month",
+                      "monthEndBalance",
+                      "bank",
+                      "currency",
+                      "listOfDebitTransactions",
+                      "listOfCreditTransactions"
+                  ],
+                  "additionalProperties": false
+              }
+          }
+        type: json_schema
+      system-message: |-
+        You are a financial data extraction specialist with expertise in bank statement analysis. Your role is to accurately extract structured financial data from bank statements.
+
+        **Key Responsibilities:**
+        1. **Accuracy:** Ensure all numerical data is extracted correctly
+        2. **Completeness:** Extract all required fields from the statement
+        3. **Format Compliance:** Follow the specified format requirements exactly
+        4. **Currency Standards:** Use proper ISO 4217 currency codes
+        5. **Date Formatting:** Use mmm-yyyy format for statement periods
+        6. **Factual Extraction:** Only extract information explicitly stated in the document
+
+        **Data Quality Standards:**
+        - Verify all calculations are mathematically correct
+        - Ensure currency codes follow ISO 4217 standard format (exactly 3 uppercase letters)
+        - Double-check month format is mmm-yyyy (Aug-2025, not August-2025)
+        - Confirm all required fields are present and valid
+        - Use null for any fields where information is not available in the statement
+        - Never infer or assume information not explicitly stated in the document
+        - Only extract factual data that is clearly visible in the statement
+        - For transaction lists: extract all individual transactions with date, description, and amount
+        - Transaction dates should be in YYYY-MM-DD format
+        - Transaction amounts should be positive numbers (absolute values)
+        - Include all transactions visible in the statement period
+      temperature: 0.1
+      top-p: 0.1
+
+  # Step 3: Convert JSON response to structured data
+  data-to-json:
+    type: json
+    task: TASK_UNMARSHAL
+    input:
+      string: ${extract-financial-data.output.texts[0]}
+
+  # Step 4: Calculate daily end balances using reasoning (text output)
+  calculate-daily-balances:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        You are a financial analyst tasked with calculating daily end balances from bank statement transactions.
+
+        **BANK STATEMENT CONTENT:**
+        ${statement-to-text.output.body}
+
+        **EXTRACTED TRANSACTION DATA:**
+        ${data-to-json.output.json}
+
+        **CRITICAL DAILY BALANCE CALCULATION RULES:**
+        
+        **STEP-BY-STEP ALGORITHM (FOLLOW EXACTLY):**
+        
+        1. **IDENTIFY KNOWN BALANCES**: Find all transaction dates with their resulting balances from the statement
+        
+        2. **SORT TRANSACTIONS**: Sort all transactions by date (earliest to latest)
+        
+        3. **WORK BACKWARD FROM EACH TRANSACTION**:
+           - For each transaction, calculate what the balance was BEFORE that transaction
+           - DEBIT transaction: Balance_before = Balance_after + Transaction_amount
+           - CREDIT transaction: Balance_before = Balance_after - Transaction_amount
+           - This "balance_before" becomes the end balance for the day BEFORE the transaction date
+        
+        4. **FILL IN GAPS**:
+           - For any day between transactions: use the balance from the most recent previous transaction
+           - For any day before the first transaction: use the balance before the first transaction
+           - For any day after the last transaction: use the balance after the last transaction
+        
+        5. **HANDLE MULTIPLE TRANSACTIONS PER DAY**:
+           - If multiple transactions occur on the same day, process them in chronological order
+           - Start with the final balance of that day
+           - Work backward through each transaction using the formula above
+           - The balance before the first transaction of that day becomes the end balance for the previous day
+        
+        **EXAMPLE WITH MULTIPLE SCENARIOS**:
+        
+        Scenario A - Single transaction:
+        - 2025-04-25: $50 debit, resulting balance = $1000
+        - 2025-04-25 end balance = $1000
+        - 2025-04-24 end balance = $1000 + $50 = $1050 (balance before the debit)
+        
+        Scenario B - Multiple transactions on one day:
+        - 2025-04-25: $50 debit, then $200 credit, final balance = $1000
+        - 2025-04-25 end balance = $1000
+        - Before $200 credit: $1000 + $200 = $1200
+        - Before $50 debit: $1200 + $50 = $1250
+        - 2025-04-24 end balance = $1250
+        
+        Scenario C - Sparse transactions:
+        - 2025-04-20: $200 credit, balance after transaction = $800
+        - 2025-04-25: $50 debit, balance after transaction = $750
+        - 2025-04-30: $100 debit, final balance = $650
+        - 2025-04-30 end balance = $650
+        - Before $100 debit on 2025-04-30: $650 + $100 = $750
+        - 2025-04-25 end balance = $750 (after the $50 debit)
+        - Before $50 debit on 2025-04-25: $750 + $50 = $800
+        - 2025-04-20 end balance = $800 (after the $200 credit)
+        - Before $200 credit on 2025-04-20: $800 - $200 = $600
+        - Days 2025-04-01 to 2025-04-19: end balance = $600 (before the first transaction)
+        - Days 2025-04-21 to 2025-04-24: end balance = $800 (after 2025-04-20 transaction)
+        - Days 2025-04-26 to 2025-04-29: end balance = $750 (after 2025-04-25 transaction)
+        
+        **CRITICAL**: Always work backward from known balances. Never assume a day's balance equals the previous day's balance unless there are no transactions.
+
+        **YOUR TASK:**
+        Analyze the bank statement and extracted transaction data above. Follow the step-by-step algorithm to calculate daily end balances for each day of the statement period.
+
+        Provide your reasoning step by step, showing:
+        1. All transaction dates and their resulting balances
+        2. Your backward calculations for each transaction
+        3. How you fill in the gaps between transactions
+        4. The final list of daily end balances for each day of the statement period
+
+        Format your final answer as a clear list of daily end balances with dates and amounts.
+      temperature: 0.1
+      top-p: 0.1
+
+  # Step 5: Format daily balances into structured JSON
+  format-daily-balances:
+    type: openai
+    task: TASK_TEXT_GENERATION
+    input:
+      model: gpt-4o
+      prompt: |-
+        Convert the daily balance calculation results into a structured JSON format.
+
+        **DAILY BALANCE CALCULATION RESULTS:**
+        ${calculate-daily-balances.output.texts[0]}
+
+        **REQUIRED JSON FORMAT:**
+        Create a JSON object with a "dailyEndBalances" array containing objects with "date" and "balance" fields.
+
+        Each object should have:
+        - "date": Date in YYYY-MM-DD format
+        - "balance": Account balance at the end of this day (number)
+
+        Example format:
+        {
+          "dailyEndBalances": [
+            {"date": "2025-04-01", "balance": 1000.00},
+            {"date": "2025-04-02", "balance": 1000.00},
+            {"date": "2025-04-03", "balance": 950.00},
+            ...
+          ]
+        }
+
+        Extract all daily end balances from the calculation results and format them as a valid JSON object.
+      response-format:
+        json-schema: |
+          {
+            "name": "daily_balances_data",
+            "strict": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "dailyEndBalances": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "date": {"type": "string"},
+                      "balance": {"type": "number"}
+                    },
+                    "required": ["date", "balance"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["dailyEndBalances"],
+              "additionalProperties": false
+            }
+          }
+        type: json_schema
+      temperature: 0.1
+      top-p: 0.1
+
+  # Step 6: Convert daily balances JSON to structured data
+  daily-balances-to-json:
+    type: json
+    task: TASK_UNMARSHAL
+    input:
+      string: ${format-daily-balances.output.texts[0]}
+
+  # Step 7: Merge data and add computed fields
+  merge-and-compute:
+    type: json
+    task: TASK_JQ
+    input:
+      json-value: ${data-to-json.output.json}
+      jq-filter: |
+        # First merge the daily balances
+        . + {"dailyEndBalances": (${daily-balances-to-json.output.json} | .dailyEndBalances // [])}
+        # Then add computed fields
+        | (.listOfDebitTransactions  // []) as $debits
+        | (.listOfCreditTransactions // []) as $credits
+        | (.dailyEndBalances // [])  as $balances
+        | . + {
+            noOfDebitTransactions: ($debits | length),
+            noOfCreditTransactions: ($credits | length),
+            totalDebits: ($debits  | map(.amount) | add // 0),
+            totalCredits: ($credits | map(.amount) | add // 0),
+            avgMonthlyDebit: (
+              ($debits | length) as $n
+              | if $n > 0 then (($debits | map(.amount) | add) / $n) else 0 end
+            ),
+            avgMonthlyCredit: (
+              ($credits | length) as $m
+              | if $m > 0 then (($credits | map(.amount) | add) / $m) else 0 end
+            ),
+            avgBankBalance: (
+              ($balances | length) as $b
+              | if $b > 0 then (($balances | map(.balance) | add) / $b) else 0 end
+            ),
+            fileName: "bs"
+          }
+
+  # Step 8: Map to the Sheet Column name
+  sheet-data:
+    type: json
+    task: TASK_RENAME_FIELDS
+    input:
+      json: ${merge-and-compute.output.results[0]}
+      fields:
+        - from: month
+          to: Month
+        - from: totalDebits
+          to: Total Debits
+        - from: totalCredits
+          to: Total Credits
+        - from: monthEndBalance
+          to: Month end balance
+        - from: avgMonthlyDebit
+          to: Avg. monthly debit
+        - from: avgMonthlyCredit
+          to: Avg. monthly credit
+        - from: avgBankBalance
+          to: Avg. bank balance        
+        - from: noOfDebitTransactions
+          to: No. of debit transactions
+        - from: noOfCreditTransactions
+          to: No. of credit transactions
+        - from: bank
+          to: Bank    
+        - from: fileName
+          to: File Name    
+        - from: currency
+          to: Currency
+      conflict-resolution: overwrite   
+
+  # Step 9: Write into a sheet, with the matching column title 
+  google-sheets:
+    type: google-sheets
+    task: TASK_INSERT_ROW
+    # Replace the connection ID with the one you copied from the integration page > Google Sheets connection
+    setup: ${connection.google-sheets-xiaofei-du-ins-e1v}
+    input:
+      shared-link: ${variable.sheet-shared-link}
+      sheet-name: ${variable.sheet-name}
+      row-value: ${sheet-data.output.json}
+
+output:
+  extracted_text:
+    title: Extracted Statement Text
+    value: ${statement-to-text.output.body}
+    instill-ui-order: 1
+  daily_balance_calculation:
+    title: Daily Balance Calculation Reasoning
+    value: ${calculate-daily-balances.output.texts[0]}
+    instill-ui-order: 2
+  merged_data_json:
+    title: Merged Data JSON
+    value: ${merge-and-compute.output.results[0]}
+    instill-ui-order: 3
+  sheet_data_json:
+    title: Sheet Data JSON
+    value: ${sheet-data.output.json}
+    instill-ui-order: 4
+  write-status:
+    title: Google Sheets Write Row information
+    value: ${google-sheets.output.row}
+    instill-ui-order: 5
